@@ -24,24 +24,17 @@ import (
 // buffer.InMessage
 ////////////////////////////////////////////////////////////////////////
 
-// LOCKS_EXCLUDED(c.mu)
 func (c *Connection) getInMessage() *buffer.InMessage {
-	c.mu.Lock()
-	x := (*buffer.InMessage)(c.inMessages.Get())
-	c.mu.Unlock()
-
-	if x == nil {
-		x = buffer.NewInMessage()
+	x := c.inMessages.Get()
+	if x != nil {
+		return x.(*buffer.InMessage)
 	}
 
-	return x
+	return buffer.NewInMessage()
 }
 
-// LOCKS_EXCLUDED(c.mu)
 func (c *Connection) putInMessage(x *buffer.InMessage) {
-	c.mu.Lock()
-	c.inMessages.Put(unsafe.Pointer(x))
-	c.mu.Unlock()
+	c.inMessages.Put(x)
 }
 
 ////////////////////////////////////////////////////////////////////////

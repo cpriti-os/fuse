@@ -78,7 +78,7 @@ type Connection struct {
 	cancelFuncs map[uint64]func()
 
 	// Freelists, serviced by freelists.go.
-	inMessages  freelist.Freelist // GUARDED_BY(mu)
+	inMessages  sync.Pool
 	outMessages freelist.Freelist // GUARDED_BY(mu)
 }
 

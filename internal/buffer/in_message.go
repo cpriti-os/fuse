@@ -52,11 +52,21 @@ type InMessage struct {
 	size      int
 }
 
+var inMessagePool sync.Pool
+
 // NewInMessage creates a new InMessage with its storage initialized.
 func NewInMessage() *InMessage {
-	return &InMessage{
-		storage: make([]byte, bufSize),
+	v := inMessagePool.Get()
+	if v == nil {
+		return &InMessage{
+			storage: make([]byte, bufSize),
+		}
 	}
+	return v.(*InMessage)
+}
+
+func (m *InMessage) Recycle() {
+	inMessagePool.Put(m)
 }
 
 var readLock sync.Mutex

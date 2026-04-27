@@ -25,16 +25,11 @@ import (
 ////////////////////////////////////////////////////////////////////////
 
 func (c *Connection) getInMessage() *buffer.InMessage {
-	x := c.inMessages.Get()
-	if x != nil {
-		return x.(*buffer.InMessage)
-	}
-
 	return buffer.NewInMessage()
 }
 
 func (c *Connection) putInMessage(x *buffer.InMessage) {
-	c.inMessages.Put(x)
+	x.Recycle()
 }
 
 ////////////////////////////////////////////////////////////////////////

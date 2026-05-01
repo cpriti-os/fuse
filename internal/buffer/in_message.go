@@ -32,9 +32,22 @@ var pageSize int
 // associated with a write request.
 var bufSize int
 
+var (
+	smallPool sync.Pool
+	bufPool   sync.Pool
+)
+
+const smallBufferSize = 256
+
 func init() {
 	pageSize = syscall.Getpagesize()
 	bufSize = pageSize + MaxWriteSize
+	smallPool.New = func() interface{} {
+		return make([]byte, smallBufferSize)
+	}
+	bufPool.New = func() interface{} {
+		return make([]byte, bufSize)
+	}
 }
 
 // Return the hardware page size. Note that this is not always 4KiB! Notably
@@ -55,7 +68,7 @@ type InMessage struct {
 // NewInMessage creates a new InMessage with its storage initialized.
 func NewInMessage() *InMessage {
 	return &InMessage{
-		storage: make([]byte, bufSize),
+		storage: bufPool.Get().([]byte),
 	}
 }
 
@@ -82,6 +95,10 @@ func (m *InMessage) ReadSingle(r io.Reader) (int, error) {
 // Consume will consume the bytes directly after the fusekernel.InHeader
 // struct.
 func (m *InMessage) Init(r io.Reader) error {
+	if len(m.storage) < bufSize {
+		smallPool.Put(m.storage)
+		m.storage = bufPool.Get().([]byte)
+	}
 
 	var n int
 	var err error
@@ -110,6 +127,16 @@ func (m *InMessage) Init(r io.Reader) error {
 			"Header says %d bytes, but we read %d",
 			m.Header().Len,
 			n)
+	}
+
+	if n <= smallBufferSize && m.Header().Opcode != fusekernel.OpRead {
+		small := smallPool.Get().([]byte)
+		copy(small, m.storage[:n])
+
+		large := m.storage
+		m.storage = small
+		m.remaining = m.storage[headerSize:n]
+		bufPool.Put(large)
 	}
 
 	return nil

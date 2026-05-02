@@ -33,8 +33,14 @@ var pageSize int
 var bufSize int
 
 var (
-	smallPool sync.Pool
-	bufPool   sync.Pool
+	smallBufs struct {
+		sync.Mutex
+		list [][]byte
+	}
+	largeBufs struct {
+		sync.Mutex
+		list [][]byte
+	}
 )
 
 const smallBufferSize = 256
@@ -42,12 +48,44 @@ const smallBufferSize = 256
 func init() {
 	pageSize = syscall.Getpagesize()
 	bufSize = pageSize + MaxWriteSize
-	smallPool.New = func() interface{} {
-		return make([]byte, smallBufferSize)
+}
+
+func getSmallBuf() []byte {
+	smallBufs.Lock()
+	n := len(smallBufs.list)
+	if n > 0 {
+		b := smallBufs.list[n-1]
+		smallBufs.list = smallBufs.list[:n-1]
+		smallBufs.Unlock()
+		return b
 	}
-	bufPool.New = func() interface{} {
-		return make([]byte, bufSize)
+	smallBufs.Unlock()
+	return make([]byte, smallBufferSize)
+}
+
+func putSmallBuf(b []byte) {
+	smallBufs.Lock()
+	smallBufs.list = append(smallBufs.list, b)
+	smallBufs.Unlock()
+}
+
+func getLargeBuf() []byte {
+	largeBufs.Lock()
+	n := len(largeBufs.list)
+	if n > 0 {
+		b := largeBufs.list[n-1]
+		largeBufs.list = largeBufs.list[:n-1]
+		largeBufs.Unlock()
+		return b
 	}
+	largeBufs.Unlock()
+	return make([]byte, bufSize)
+}
+
+func putLargeBuf(b []byte) {
+	largeBufs.Lock()
+	largeBufs.list = append(largeBufs.list, b)
+	largeBufs.Unlock()
 }
 
 // Return the hardware page size. Note that this is not always 4KiB! Notably
@@ -68,7 +106,7 @@ type InMessage struct {
 // NewInMessage creates a new InMessage with its storage initialized.
 func NewInMessage() *InMessage {
 	return &InMessage{
-		storage: bufPool.Get().([]byte),
+		storage: getLargeBuf(),
 	}
 }
 
@@ -96,8 +134,8 @@ func (m *InMessage) ReadSingle(r io.Reader) (int, error) {
 // struct.
 func (m *InMessage) Init(r io.Reader) error {
 	if len(m.storage) < bufSize {
-		smallPool.Put(m.storage)
-		m.storage = bufPool.Get().([]byte)
+		putSmallBuf(m.storage)
+		m.storage = getLargeBuf()
 	}
 
 	var n int
@@ -129,14 +167,14 @@ func (m *InMessage) Init(r io.Reader) error {
 			n)
 	}
 
-	if n <= smallBufferSize && m.Header().Opcode != fusekernel.OpRead {
-		small := smallPool.Get().([]byte)
+	if n <= smallBufferSize {
+		small := getSmallBuf()
 		copy(small, m.storage[:n])
 
 		large := m.storage
 		m.storage = small
 		m.remaining = m.storage[headerSize:n]
-		bufPool.Put(large)
+		putLargeBuf(large)
 	}
 
 	return nil
@@ -178,10 +216,3 @@ func (m *InMessage) ConsumeBytes(n uintptr) []byte {
 	return b
 }
 
-// Get the next n bytes after the message to use them as a temporary buffer
-func (m *InMessage) GetFree(n int) []byte {
-	if n <= 0 || n > len(m.storage)-m.size {
-		return nil
-	}
-	return m.storage[m.size : m.size+n]
-}

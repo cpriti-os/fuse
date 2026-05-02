@@ -395,8 +395,18 @@ func convertInMessage(
 				Uid:    inMsg.Header().Uid,
 			},
 		}
-		// Use part of the incoming message storage as the read buffer.
-		to.Dst = inMsg.GetFree(int(in.Size))
+
+		readSize := int(in.Size)
+		p := outMsg.Grow(readSize)
+		if p == nil {
+			return nil, fmt.Errorf("Can't grow for %d-byte read", readSize)
+		}
+
+		if readSize > 0 {
+			to.Dst = unsafe.Slice((*byte)(p), readSize)
+		} else {
+			to.Dst = nil
+		}
 		o = to
 
 	case fusekernel.OpReaddir:
